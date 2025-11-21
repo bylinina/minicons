@@ -3788,32 +3788,81 @@ class MambaScorer(LMScorer):
 
 
 class VLMScorer(LMScorer):
-    def __init__(self, model, device, tokenizer=None, causallm=False, **kwargs):
+    def __init__(
+        self,
+        model,
+        device,
+        tokenizer=None,
+        causallm=False,
+        load_in_4bit=False,
+        load_in_8bit=False,
+        **kwargs
+    ):
         super(VLMScorer, self).__init__(model, device=device, tokenizer=tokenizer)
         self.causallm = causallm
+
+        quant_cfg = None
+        if load_in_4bit:
+            from transformers import BitsAndBytesConfig
+            quant_cfg = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+            )
+        elif load_in_8bit:
+            from transformers import BitsAndBytesConfig
+            quant_cfg = BitsAndBytesConfig(load_in_8bit=True)
+
         if isinstance(model, str):
+
             if self.causallm:
                 self.tokenizer = AutoTokenizer.from_pretrained(model, **kwargs)
                 self.processor = AutoProcessor.from_pretrained(model, **kwargs)
+
                 if self.device == "auto":
                     self.model = AutoModelForCausalLM.from_pretrained(
-                        model, device_map=self.device, **kwargs
+                        model,
+                        device_map="auto",
+                        trust_remote_code=True,
+                        quantization_config=quant_cfg,
+                        **kwargs
                     )
                 else:
-                    self.model = AutoModelForCausalLM.from_pretrained(model, **kwargs)
+                    self.model = AutoModelForCausalLM.from_pretrained(
+                        model,
+                        trust_remote_code=True,
+                        quantization_config=quant_cfg,
+                        **kwargs
+                    )
+
             else:
                 self.tokenizer = AutoProcessor.from_pretrained(model, **kwargs)
+
                 if self.device == "auto":
                     self.model = AutoModelForVision2Seq.from_pretrained(
-                        model, device_map=self.device, **kwargs
+                        model,
+                        device_map="auto",
+                        trust_remote_code=True,
+                        quantization_config=quant_cfg,
+                        **kwargs
                     )
                 else:
-                    self.model = AutoModelForVision2Seq.from_pretrained(model, **kwargs)
+                    self.model = AutoModelForVision2Seq.from_pretrained(
+                        model,
+                        trust_remote_code=True,
+                        quantization_config=quant_cfg,
+                        **kwargs
+                    )
+
         else:
             self.model = model
 
         if self.device != "auto":
-            self.model.to(self.device)
+            try:
+                self.model.to(self.device)
+            except Exception as e:
+                print(f'Warning: could not move model to {self.device}: {e}')
 
         if "processor" in type(self.tokenizer).__name__.lower():
             if self.tokenizer.tokenizer.padding_side == "left":
